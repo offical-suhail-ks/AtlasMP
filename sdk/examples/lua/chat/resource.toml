@@ -1,0 +1,20 @@
+# sdk/examples/lua/chat/resource.toml
+# AtlasMP resource manifest
+
+[resource]
+name        = "chat"
+version     = "1.0.0"
+author      = "AtlasMP Team"
+description = "Basic chat system with commands"
+
+[scripts]
+server = ["server.lua"]
+client = ["client.lua"]
+
+[files]
+# Files to stream to connecting clients
+stream = []
+
+[dependencies]
+# Other resources this depends on (must start first)
+requires = []

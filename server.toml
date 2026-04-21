@@ -1,0 +1,53 @@
+# AtlasMP Server Configuration
+# Documentation: docs/guides/building.md
+
+# ─── Server ──────────────────────────────────────────────────────────────────
+[server]
+name        = "My AtlasMP Server"
+description = "A custom GTA V multiplayer server"
+host        = "0.0.0.0"
+port        = 7788
+max_players = 128
+password    = ""          # Leave empty for public server
+announce    = true        # Announce to master server list
+
+# ─── Resources ───────────────────────────────────────────────────────────────
+[resources]
+path      = "resources"   # Folder to scan for resources
+
+autostart = [
+    "chat",               # Basic chat system
+    "freeroam",           # Default freeroam gamemode
+]
+
+# ─── Sync ────────────────────────────────────────────────────────────────────
+[sync]
+tick_rate     = 60        # Entity sync frequency (Hz). Max: 128
+max_entities  = 1000      # Max simultaneous synced entities
+interest_dist = 500.0     # Distance (units) beyond which entities aren't synced
+
+# ─── Anti-Cheat ──────────────────────────────────────────────────────────────
+[anticheat]
+enabled            = true
+kick_on_violation  = true
+max_speed_mps      = 150.0   # Max player speed (m/s) before flagging. Car ~80, plane ~150
+log_violations     = true
+
+# ─── Database ────────────────────────────────────────────────────────────────
+[database]
+driver = "sqlite"         # "sqlite" only for now. MySQL planned.
+path   = "data/atlasmp.db"
+
+# ─── Logging ─────────────────────────────────────────────────────────────────
+[logging]
+level      = "info"       # "debug" | "info" | "warn" | "error"
+file       = "logs/server.log"
+max_size   = 10           # Max log file size in MB before rotation
+max_files  = 5            # Number of rotated log files to keep
+
+# ─── HTTP API (for dashboard) ────────────────────────────────────────────────
+[http]
+enabled  = true
+port     = 7789
+password = "changeme"     # Change this! Used for dashboard auth
+cors     = "http://localhost:3000"  # Allowed origin for dev dashboard
