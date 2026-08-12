@@ -3,6 +3,7 @@
 #include "../core/Logger.h"
 #include "../network/NetworkServer.h"
 #include "../../include/PlayerManager.h"
+#include <cmath>
 
 namespace Atlas {
 
@@ -112,6 +113,28 @@ void SyncManager::BroadcastPlayerStates() {
             Packets::PacketType::PLAYER_STATE,
             &pkt, sizeof(pkt), false); // unreliable for state
     });
+
+    // ── DEBUG: fake moving player (test remote rendering with one real client) ──
+    // Phantom player 999 walks a slow circle near the airport spawn so a single
+    // connected client can see a remote ped appear and move. Remove this block
+    // once real two-client testing works.
+#if 1
+    {
+        static float t = 0.0f;
+        t += 0.05f;
+        Packets::PlayerStatePacket fake{};
+        fake.playerId = 999;
+        // Circle of radius 5m around a fixed point near the client's spawn.
+        fake.position.x = -1165.9f + 5.0f * cosf(t);
+        fake.position.y = -1426.4f + 5.0f * sinf(t);
+        fake.position.z = 4.6f;
+        fake.heading    = t * 57.2958f; // radians->deg, so it faces its travel
+        fake.health     = 200;
+        // Broadcast to EVERYONE (the phantom has no own connection to exclude).
+        m_network->Broadcast(Packets::PacketType::PLAYER_STATE,
+                             &fake, sizeof(fake), false);
+    }
+#endif
 }
 
 void SyncManager::BroadcastVehicleStates() {

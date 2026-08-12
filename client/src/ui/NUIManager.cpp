@@ -19,12 +19,12 @@ void NUIManager::Shutdown() {
 }
 
 int NUIManager::CreateBrowser(const std::string& url, int width, int height) {
-    Logger::Info("[NUI] CreateBrowser (stub): {} {}x{}", url.c_str(), width, height);
+    Logger::Info("[NUI] CreateBrowser (stub): %s %dx%d", url.c_str(), (int)width, (int)height);
     return m_nextHandle++;
 }
 
 void NUIManager::DestroyBrowser(int handle) {
-    Logger::Info("[NUI] DestroyBrowser (stub): {}", handle);
+    Logger::Info("[NUI] DestroyBrowser (stub): %d", (int)handle);
 }
 
 void NUIManager::SetVisible(int handle, bool visible) {

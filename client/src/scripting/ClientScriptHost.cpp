@@ -28,7 +28,7 @@ void ClientScriptHost::Tick(float /*deltaTime*/) {
 bool ClientScriptHost::LoadScript(const std::string& path,
                                    const std::string& language)
 {
-    Logger::Info("[ClientScripts] LoadScript stub: {} ({})",
+    Logger::Info("[ClientScripts] LoadScript stub: %s (%s)",
                  path.c_str(), language.c_str());
     return true;
 }
@@ -36,7 +36,7 @@ bool ClientScriptHost::LoadScript(const std::string& path,
 void ClientScriptHost::TriggerEvent(const std::string& name,
                                      const std::vector<std::string>& /*args*/)
 {
-    Logger::Debug("[ClientScripts] TriggerEvent: {}", name.c_str());
+    Logger::Debug("[ClientScripts] TriggerEvent: %s", name.c_str());
 }
 
 } // namespace Atlas

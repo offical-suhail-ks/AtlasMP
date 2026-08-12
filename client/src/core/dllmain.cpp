@@ -1,50 +1,39 @@
 // client/src/core/dllmain.cpp
-// AtlasMP Client DLL
-// Injected at CREATE_SUSPENDED — DllMain runs before any GTA code.
-// Installs MessageBoxW hook immediately to suppress ERR_NO_LAUNCHER.
+// AtlasMP Client — ScriptHookV ASI plugin (Option A).
+//
+// Deployment (all in the GTA V folder):
+//   dinput8.dll         (Ultimate ASI Loader)
+//   ScriptHookV.dll     (Alexander Blade)
+//   AtlasMP-Client.asi  (this build)
+//   atlasmp-client.toml (config)
+//
+// ScriptHookV loads first, initializes native access, then loads our .asi and
+// calls ScriptMain() on its script thread. We drive Client::Tick() from there,
+// so every native call runs on the correct thread with ScriptHookV ready.
 
 #include "Client.h"
 #include "Logger.h"
+#include "../hooks/NativeInvoker.h"
+#ifndef WIN32_LEAN_AND_MEAN
+#  define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#  define NOMINMAX
+#endif
 #include <Windows.h>
-#include <MinHook.h>
 #include <filesystem>
 #include <fstream>
 #include <string>
-#include <thread>
 #include <algorithm>
 #include <cctype>
+
+// ScriptHookV SDK
+#include <main.h>
 
 static Atlas::Client* g_client  = nullptr;
 static HMODULE        g_hModule = nullptr;
 
-// ── ERR_NO_LAUNCHER hook ──────────────────────────────────────────────────────
-typedef int (WINAPI* FnMsgW)(HWND,LPCWSTR,LPCWSTR,UINT);
-typedef int (WINAPI* FnMsgA)(HWND,LPCSTR, LPCSTR, UINT);
-static FnMsgW g_origMsgW = nullptr;
-static FnMsgA g_origMsgA = nullptr;
-
-static int WINAPI Hook_MsgW(HWND h,LPCWSTR txt,LPCWSTR cap,UINT t){
-    if((txt&&wcsstr(txt,L"ERR_NO_LAUNCHER"))||(cap&&wcsstr(cap,L"ERR_NO_LAUNCHER")))
-        return IDOK;
-    return g_origMsgW(h,txt,cap,t);
-}
-static int WINAPI Hook_MsgA(HWND h,LPCSTR txt,LPCSTR cap,UINT t){
-    if((txt&&strstr(txt,"ERR_NO_LAUNCHER"))||(cap&&strstr(cap,"ERR_NO_LAUNCHER")))
-        return IDOK;
-    return g_origMsgA(h,txt,cap,t);
-}
-
-static void InstallHooks(){
-    // Must succeed before any game code runs
-    if(MH_Initialize()!=MH_OK)return;
-    HMODULE u=LoadLibraryA("user32.dll");if(!u)return;
-    void* w=GetProcAddress(u,"MessageBoxW");
-    void* a=GetProcAddress(u,"MessageBoxA");
-    if(w){MH_CreateHook(w,(void*)Hook_MsgW,(void**)&g_origMsgW);MH_EnableHook(w);}
-    if(a){MH_CreateHook(a,(void*)Hook_MsgA,(void**)&g_origMsgA);MH_EnableHook(a);}
-}
-
-// ── Config ────────────────────────────────────────────────────────────────────
+// ── Config (unchanged parser) ────────────────────────────────────────────────
 namespace {
 struct Cfg{std::string host="127.0.0.1";uint16_t port=7788;std::string name="AtlasPlayer",pw;bool ac=true;};
 static std::string Tr(std::string v){v.erase(v.begin(),std::find_if(v.begin(),v.end(),[](unsigned char c){return!std::isspace(c);}));v.erase(std::find_if(v.rbegin(),v.rend(),[](unsigned char c){return!std::isspace(c);}).base(),v.end());return v;}
@@ -69,82 +58,122 @@ static bool LoadCfg(const std::string& path,Cfg& c){
     }
     return true;
 }
+static std::string DirOf(HMODULE m){wchar_t p[MAX_PATH]{};GetModuleFileNameW(m,p,MAX_PATH);return std::filesystem::path(p).parent_path().string();}
 static std::string FindCfg(){
     namespace fs=std::filesystem;
-    wchar_t exe[MAX_PATH]{};GetModuleFileNameW(nullptr,exe,MAX_PATH);
-    wchar_t dll[MAX_PATH]{};GetModuleFileNameW(g_hModule,dll,MAX_PATH);
-    for(auto d:{fs::path(exe).parent_path().string(),fs::path(dll).parent_path().string()}){
-        std::string p=d+"\\atlasmp-client.toml";if(fs::exists(p))return p;
+    for(auto d:{DirOf(nullptr),DirOf(g_hModule)}){std::string p=d+"\\atlasmp-client.toml";if(fs::exists(p))return p;}
+    return DirOf(g_hModule)+"\\atlasmp-client.toml";
+}
+}
+
+// ── AtlasMP Boot Sequence ─────────────────────────────────────────────────────
+// Runs once after story mode loads. Skips the intro, sets a freemode character,
+// and teleports to the AtlasMP spawn point. Everything runs on ScriptHookV's
+// script thread so native calls are safe.
+static void AtlasBootSequence() {
+    constexpr uint64_t PLAYER_PED_ID    = 0xD80958FC74E988A6;
+    constexpr uint64_t DOES_ENTITY_EXIST= 0x7239B21A38F536BA;
+    constexpr uint64_t SET_ENTITY_COORDS= 0x06843DA7060A026B;
+    constexpr uint64_t SET_ENTITY_HDG   = 0x8E2530AA8ADA980E;
+    constexpr uint64_t GET_HASH_KEY     = 0xD24D37CC275948CC;
+    constexpr uint64_t REQUEST_MODEL    = 0x963D27A58DF860AC;
+    constexpr uint64_t HAS_MODEL_LOADED = 0x98A4EB5D89A0C952;
+    constexpr uint64_t NO_LONGER_NEEDED = 0xE532F5D78798DAAB;
+    // SET_PLAYER_MODEL from FiveM docs — if game closes here, comment it out.
+    constexpr uint64_t SET_PLAYER_MODEL = 0x00A1CADD00108836;
+
+    if (!g_client) return;
+    auto* nv = g_client->GetNatives();
+    if (!nv) return;
+
+    Atlas::Logger::Info("[Boot] Waiting for game world...");
+
+    // Wait for player ped to exist (world is ready, story mode loaded).
+    for (int i = 0; i < 30000; ++i) {
+        int ped = nv->Call<int>(PLAYER_PED_ID);
+        if (ped != 0 && nv->Call<int>(DOES_ENTITY_EXIST, ped)) break;
+        WAIT(0);
     }
-    return fs::path(dll).parent_path().string()+"\\atlasmp-client.toml";
-}
+    // 3 extra seconds — lets any intro cutscene start so we cleanly override it.
+    for (int i = 0; i < 180; ++i) WAIT(0);
+
+    int ped = nv->Call<int>(PLAYER_PED_ID);
+    if (ped == 0) { Atlas::Logger::Error("[Boot] No player ped — abort"); return; }
+
+    Atlas::Logger::Info("[Boot] World ready — applying AtlasMP character");
+
+    // Set freemode male character model (GTA Online freemode).
+    uint32_t model = nv->Call<uint32_t>(GET_HASH_KEY, "mp_m_freemode_01");
+    nv->Call<void>(REQUEST_MODEL, model);
+    for (int i = 0; i < 500 && !nv->Call<int>(HAS_MODEL_LOADED, model); ++i) WAIT(0);
+    if (nv->Call<int>(HAS_MODEL_LOADED, model)) {
+        nv->Call<void>(SET_PLAYER_MODEL, 0, model); // 0 = local player index
+        nv->Call<void>(NO_LONGER_NEEDED, model);
+        Atlas::Logger::Info("[Boot] Character: mp_m_freemode_01");
+        for (int i = 0; i < 30; ++i) WAIT(0); // let model swap settle
+        ped = nv->Call<int>(PLAYER_PED_ID);     // re-get ped after swap
+    }
+
+    // Teleport to AtlasMP spawn — Pillbox Hill, central LS, open area.
+    if (ped != 0) {
+        nv->Call<void>(SET_ENTITY_COORDS, ped, -269.4f, -955.3f, 31.2f, 0, 0, 0, 1);
+        nv->Call<void>(SET_ENTITY_HDG,    ped, 90.0f);
+        Atlas::Logger::Info("[Boot] Spawned at AtlasMP location (-269, -955, 31)");
+    }
+
+    Atlas::Logger::Info("[Boot] Done — handing off to AtlasMP loop");
 }
 
-// ── Client thread ─────────────────────────────────────────────────────────────
-static void ClientThread(){
-    // Give GTA time to finish loading before we connect
-    Sleep(8000);
-
-    wchar_t dllW[MAX_PATH]{};GetModuleFileNameW(g_hModule,dllW,MAX_PATH);
-    std::string log=std::filesystem::path(dllW).parent_path().string()+"\\AtlasMP-client.log";
-    std::string cfg=FindCfg();
+// ── ScriptHookV entry ────────────────────────────────────────────────────────
+// Called by ScriptHookV on its script thread. Natives are safe to call here.
+static void ScriptMain() {
+    // One-time init.
+    std::string log = DirOf(g_hModule) + "\\AtlasMP-client.log";
+    std::string cfg = FindCfg();
 
     Atlas::Logger::Init(log);
-    Atlas::Logger::Info("[DLL] AtlasMP Client v" ATLAS_VERSION_STRING);
-    Atlas::Logger::Info("[DLL] Log: %s",log.c_str());
-    Atlas::Logger::Info("[DLL] Cfg: %s",cfg.c_str());
-    Atlas::Logger::Info("[DLL] ERR_NO_LAUNCHER: suppressed via MessageBoxW hook");
+    Atlas::Logger::Info("[ASI] AtlasMP Client v" ATLAS_VERSION_STRING " (ScriptHookV mode)");
+    Atlas::Logger::Info("[ASI] Log: %s", log.c_str());
 
-    g_client=new Atlas::Client();
-    if(!g_client->Initialize()){
-        Atlas::Logger::Error("[DLL] Initialize failed");
-        delete g_client;g_client=nullptr;return;
+    g_client = new Atlas::Client();
+    if (!g_client->Initialize()) {
+        Atlas::Logger::Error("[ASI] Client init failed");
+        delete g_client; g_client = nullptr;
+        return;
     }
-    Atlas::Logger::Info("[DLL] Client initialized");
+    Atlas::Logger::Info("[ASI] Client initialized");
+
+    // ── Boot sequence: skip story intro, set character, teleport to spawn ─────
+    AtlasBootSequence();
 
     Cfg c;
-    if(LoadCfg(cfg,c))
-        Atlas::Logger::Info("[DLL] Config: %s:%u name=%s",c.host.c_str(),(unsigned)c.port,c.name.c_str());
-    else
-        Atlas::Logger::Warn("[DLL] Config not found, using defaults");
-
-    if(c.ac){
-        Atlas::Logger::Info("[DLL] Connecting to %s:%u...",c.host.c_str(),(unsigned)c.port);
-        g_client->Connect(c.host,c.port,c.name,c.pw);
+    if (LoadCfg(cfg, c) && c.ac) {
+        Atlas::Logger::Info("[ASI] Connecting to %s:%u...", c.host.c_str(), (unsigned)c.port);
+        g_client->Connect(c.host, c.port, c.name, c.pw);
     }
 
-    Atlas::Logger::Info("[DLL] Running");
-    while(g_client)Sleep(250);
-    Atlas::Logger::Info("[DLL] Exiting");
+    Atlas::Logger::Info("[ASI] Entering script loop");
+    // ScriptHookV script loop: WAIT(0) yields one game frame. Client::Tick()
+    // runs here every frame, on the script thread, with native access ready.
+    while (true) {
+        if (g_client) g_client->Tick();
+        WAIT(0);
+    }
 }
 
-// ── DllMain ───────────────────────────────────────────────────────────────────
-BOOL APIENTRY DllMain(HMODULE hModule,DWORD reason,LPVOID lpReserved){
-    switch(reason){
-    case DLL_PROCESS_ATTACH:{
-        // Named mutex guard — prevents double-init even if DLL is loaded
-        // from two different paths (e.g. .output\ and D:\GTAV\)
-        HANDLE hMutex = CreateMutexW(nullptr, TRUE, L"AtlasMP_Client_Init");
-        if(GetLastError() == ERROR_ALREADY_EXISTS){
-            if(hMutex) CloseHandle(hMutex);
-            return TRUE;
-        }
-        g_hModule=hModule;
+// ── DllMain ──────────────────────────────────────────────────────────────────
+BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID) {
+    switch (reason) {
+    case DLL_PROCESS_ATTACH:
+        g_hModule = hModule;
         DisableThreadLibraryCalls(hModule);
-        // Install MessageBoxW hook HERE in DllMain — before ResumeThread
-        // is called by the launcher. This guarantees the hook is active
-        // before GTA's entry point runs a single instruction.
-        // MinHook's VirtualProtect is safe to call from DllMain on Windows 10+.
-        InstallHooks();
-        std::thread(ClientThread).detach();
+        // Register our script with ScriptHookV. It will call ScriptMain() on
+        // its own script thread once the game is ready.
+        scriptRegister(hModule, ScriptMain);
         break;
-    }
     case DLL_PROCESS_DETACH:
-        if(!lpReserved){
-            MH_DisableHook(MH_ALL_HOOKS);
-            MH_Uninitialize();
-            if(g_client){g_client->Shutdown();delete g_client;g_client=nullptr;}
-        }
+        scriptUnregister(hModule);
+        if (g_client) { g_client->Shutdown(); delete g_client; g_client = nullptr; }
         break;
     }
     return TRUE;

@@ -41,7 +41,7 @@ bool NetworkClient::Connect(const std::string& host, uint16_t port,
     if (enet_host_service(m_host, &event, 5000) > 0 &&
         event.type == ENET_EVENT_TYPE_CONNECT)
     {
-        Logger::Info("[NetClient] Connected to {}:{}", host.c_str(), port);
+        Logger::Info("[NetClient] Connected to %s:%u", host.c_str(), (unsigned)port);
 
         // Send handshake
         Packets::HandshakeRequest req{};
@@ -57,7 +57,7 @@ bool NetworkClient::Connect(const std::string& host, uint16_t port,
         return true;
     }
 
-    Logger::Error("[NetClient] Connection to {}:{} timed out", host.c_str(), port);
+    Logger::Error("[NetClient] Connection to %s:%u timed out", host.c_str(), (unsigned)port);
     enet_peer_reset(m_server);
     m_server = nullptr;
     return false;
@@ -137,9 +137,9 @@ void NetworkClient::HandleHandshakeResponse(
     if (resp.accepted) {
         m_localId   = resp.playerId;
         m_connected = true;
-        Logger::Info("[NetClient] Authenticated — player ID {}", (int)m_localId);
+        Logger::Info("[NetClient] Authenticated - player ID %d", (int)m_localId);
     } else {
-        Logger::Error("[NetClient] Connection rejected: {}", resp.message);
+        Logger::Error("[NetClient] Connection rejected: %s", resp.message);
         enet_peer_disconnect(m_server, 0);
     }
 }

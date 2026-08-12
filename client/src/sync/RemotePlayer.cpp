@@ -25,7 +25,7 @@ void RemotePlayer::Spawn() {
     //     m_state.heading, false, false);
     // m_state.ped     = ped;
     m_state.spawned = true;
-    Logger::Info("[RemotePlayer] Spawned ped for player {}", (int)m_state.id);
+    Logger::Info("[RemotePlayer] Spawned ped for player %d", (int)m_state.id);
 }
 
 void RemotePlayer::Destroy() {

@@ -1,6 +1,12 @@
 #pragma once
 // client/src/core/Memory.h
 // Memory utilities: pattern scanning, read/write into GTA V process memory
+#ifndef WIN32_LEAN_AND_MEAN
+#  define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#  define NOMINMAX
+#endif
 #include <Windows.h>
 #include <cstdint>
 #include <string>

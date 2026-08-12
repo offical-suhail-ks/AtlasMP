@@ -11,6 +11,7 @@ add_library(AtlasMP-Client SHARED
     src/sync/SyncManager.cpp
     src/sync/LocalPlayer.cpp
     src/sync/RemotePlayer.cpp
+    src/sync/RemotePed_1604.cpp
     src/ui/NUIManager.cpp
     src/ui/WindowBranding.cpp
     src/scripting/ClientScriptHost.cpp
@@ -23,6 +24,7 @@ target_include_directories(AtlasMP-Client
     PRIVATE ${CMAKE_SOURCE_DIR}/shared/include
     PRIVATE ${CMAKE_SOURCE_DIR}/client/vendor/minhook/include
     PRIVATE ${CMAKE_SOURCE_DIR}/client/vendor/plugin-sdk/plugin_SA/sdk
+    PRIVATE ${CMAKE_SOURCE_DIR}/client/vendor/ScriptHookV/inc
 )
 
 if(DEFINED enet_SOURCE_DIR)
@@ -42,11 +44,12 @@ target_link_libraries(AtlasMP-Client PRIVATE
     dxgi.lib
     ws2_32.lib
     winmm.lib
+    ${CMAKE_SOURCE_DIR}/client/vendor/ScriptHookV/lib/ScriptHookV.lib
 )
 
 set_target_properties(AtlasMP-Client PROPERTIES
     OUTPUT_NAME "AtlasMP-Client"
-    SUFFIX ".dll"
+    SUFFIX ".asi"
     CXX_STANDARD 17
 )
 
@@ -54,6 +57,9 @@ set_target_properties(AtlasMP-Client PROPERTIES
 target_compile_definitions(AtlasMP-Client PRIVATE
     ATLAS_CLIENT_BUILD
     _USRDLL
+    WIN32_LEAN_AND_MEAN
+    NOMINMAX
+    _CRT_SECURE_NO_WARNINGS
 )
 
 # ── Output to organized folder structure ─────────────────────────────────────
